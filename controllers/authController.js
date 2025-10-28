@@ -16,15 +16,15 @@ const register = async (req, res) => {
             return res.status(404).json({ success: false, message: 'User already Exsiting. Try another Email Address' })
         }
         const hashpassword = await bcrypt.hash(password, 10)
-        const user = await db.query('INSERT INTO users (name,email,password) VALUES (?,?,?)', [name, email, hashpassword])
+        await db.query('INSERT INTO users (name,email,password) VALUES (?,?,?)', [name, email, hashpassword])
         // generating jwt token
-        const token = jwt.sign(
-            { user_id: user.id, email: user.email },                       // payload
-            process.env.SECRET,                                           // must exist
-            { expiresIn: '1d' }                                           // valid 1 day
-        );
+        // const token = jwt.sign(
+        //     { user_id: user.id, email: user.email },                       // payload
+        //     process.env.SECRET,                                           // must exist
+        //     { expiresIn: '1d' }                                           // valid 1 day
+        // );
 
-        res.status(200).json({ success: true, message: 'User Register Successfully', token })
+        res.status(200).json({ success: true, message: 'User Register Successfully', })
     } catch (error) {
         console.log(error)
         res.status(500).json({ success: false, message: 'Internal servver error' + error })
@@ -49,8 +49,13 @@ const login = async (req, res) => {
             process.env.SECRET,
             { expiresIn: '1d' }
         )
-
-        res.status(200).json({ success: true, message: 'Login Successfully', token })
+        res.cookie('token', token, {
+            httpOnly: true,   // cannot be accessed by JS (protects from XSS)
+            secure: false,    // set to true if using HTTPS
+            sameSite: 'lax',  // CSRF protection
+            maxAge: 3600000
+        })
+        res.status(200).json({ success: true, message: 'Login Successfully' })
     } catch (error) {
         console.log(error)
         res.status(500).json({ success: false, message: 'Internal servver error' + error })
@@ -63,26 +68,24 @@ const forgatePass = async (req, res) => {
     try {
         const users = await db.query('Select * from users where email = ? ', [email])
         const [user] = users[0]
-        if (!users) return res.status(400).json({ success: false, message: 'Invalid Email' })
+        if (!user) return res.status(400).json({ success: false, message: 'Invalid Email' })
 
         const otp = Math.floor(1000 + Math.random() * 9000);
-        console.log(user)
         const token = jwt.sign(
             { email: user.email },                       // payload
             process.env.SECRET,                                           // must exist
             { expiresIn: '1d' }                                           // valid 1 day
         );
-        console.log(otp)
-        // await transporter.sendMail({
-        //     from: process.env.EMAIL_USER,
-        //     to: email,
-        //     subject: 'OTP Verification',
-        //     text: `Your OTP code is ${otp}. It is valid for 5 minutes.`
-        // })
+        await transporter.sendMail({
+            from: ` "AirlLine" ${process.env.EMAIL_USER} `,
+            to: email,
+            subject: 'OTP Verification',
+            html: `<h2> Hi ${email}, <br> Your OTP code is ${otp}. It is valid for 5 minutes.</h2>`
+        })
         const expiryDate = new Date(Date.now() + 5 * 60 * 1000);
         const mysqlexpiry = expiryDate.toISOString().slice(0, 19).replace('T', ' ');
         await db.query('UPDATE users SET reset_otp = ?, reset_otp_expiry = ?  WHERE email = ? ', [otp, mysqlexpiry, email])
-        res.status(200).json({ success: true, message: 'OTP Send Successfully' })
+        res.status(200).json({ success: true, message: 'OTP Send Successfully', token })
     } catch (error) {
         console.log(error)
         res.status(500).json({ success: false, message: 'Internal servver error' + error })
@@ -103,7 +106,7 @@ const verifyOTP = async (req, res) => {
         const hashpassword = await bcrypt.hash(newPassword, 10);
         await db.query("UPDATE users SET password = ?,  reset_otp = NULL, reset_otp_expiry = NULL  WHERE email = ?", [hashpassword, user.email])
 
-        res.status(200).json({ success: true, message: 'Passworld Forgate Successfully' })
+        res.status(200).json({ success: true, message: 'Password Forgate Successfully' })
     } catch (error) {
         console.log(error)
         res.status(500).json({ success: false, message: 'Internal server error' + error })
@@ -116,18 +119,18 @@ const changePass = async (req, res) => {
     console.log(email)
     if (!currentPass || !newPassword) return res.status(401).json({ success: false, message: 'Missing Details' })
     try {
-        const [[user]] = await db.query('select password from users where email = ? ',[email])
-        const isMatch = await bcrypt.compare(currentPass,user.password);
-       if (!isMatch) return res.status(402).json({success:false,message:'Current Passworld Miss Matching'})
-        const hashNewpass= await bcrypt.hash(newPassword,10)
+        const [[user]] = await db.query('select password from users where email = ? ', [email])
+        const isMatch = await bcrypt.compare(currentPass, user.password);
+        if (!isMatch) return res.status(402).json({ success: false, message: 'Current Passworld Miss Matching' })
+        const hashNewpass = await bcrypt.hash(newPassword, 10)
 
-        await db.query('UPDATE users SET password = ? WHERE email = ? ',[hashNewpass,user.email])
+        await db.query('UPDATE users SET password = ? WHERE email = ? ', [hashNewpass, user.email])
 
 
-        res.status(200).json({success:true,message:'Password Changed'})
+        res.status(200).json({ success: true, message: 'Password Changed' })
     } catch (error) {
         console.log(error)
         res.status(500).json({ success: false, message: 'Internal server error' + error })
     }
 }
-module.exports = { register, login, forgatePass, verifyOTP,changePass }
+module.exports = { register, login, forgatePass, verifyOTP, changePass }
